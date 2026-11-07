@@ -1,0 +1,44 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & Publish macOS Universal Release
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build & Package Universal Binary (.dmg & .zip)
+        run: ./scripts/package-release.sh
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: VolumeGuard ${{ github.ref_name }}
+          generate_release_notes: true
+          body: |
+            ### VolumeGuard ${{ github.ref_name }} (macOS Universal — Apple Silicon & Intel)
+
+            #### Downloads
+            - **`VolumeGuard-v1.0.0-macOS.dmg`** — Drag-and-drop macOS installer
+            - **`VolumeGuard-v1.0.0-macOS.zip`** — Standalone `.app` archive
+
+            #### Installation
+            1. Download **`VolumeGuard-v1.0.0-macOS.dmg`** and drag **`VolumeGuard.app`** to **`/Applications`**.
+            2. Since the binary is ad-hoc signed, if macOS Gatekeeper shows a warning on first launch, run:
+               ```bash
+               xattr -cr /Applications/VolumeGuard.app
+               ```
+            3. Open **VolumeGuard** from the Menu Bar and click **Install Driver** on first use.
+          files: |
+            build/VolumeGuard-*.dmg
+            build/VolumeGuard-*.zip
