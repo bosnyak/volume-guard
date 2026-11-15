@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="$ROOT_DIR/build"
 APP_BUNDLE="$BUILD_DIR/VolumeGuard.app"
-VERSION="1.0.0"
+VERSION="${VERSION:-1.0.1}"
 DMG_STAGING="$BUILD_DIR/dmg-staging"
 DMG_PATH="$BUILD_DIR/VolumeGuard-v${VERSION}-macOS.dmg"
 ZIP_PATH="$BUILD_DIR/VolumeGuard-v${VERSION}-macOS.zip"

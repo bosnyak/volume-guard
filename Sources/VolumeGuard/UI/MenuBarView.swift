@@ -358,7 +358,7 @@ struct MenuBarView: View {
             }
 
             HStack(spacing: 8) {
-                Text("v1.0.0")
+                Text("v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.1")")
                     .font(.system(size: 10))
                     .foregroundColor(.secondary)
 

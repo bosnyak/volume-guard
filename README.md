@@ -55,7 +55,7 @@ flowchart LR
 ## Download & Installation
 
 1. Download the latest universal installer (**`.dmg`** or **`.zip`**) from the [**GitHub Releases**](https://github.com/bosnyak/volume-guard/releases/latest) page.
-2. Open **`VolumeGuard-v1.0.0-macOS.dmg`** and drag **`VolumeGuard.app`** into **`/Applications`**.
+2. Open **`VolumeGuard-v1.0.1-macOS.dmg`** and drag **`VolumeGuard.app`** into **`/Applications`**.
 3. If macOS Gatekeeper blocks the first launch (since the binary is ad-hoc signed), run:
    ```bash
    xattr -cr /Applications/VolumeGuard.app
@@ -87,8 +87,8 @@ To build ready-to-distribute archives for any Apple Silicon or Intel Mac:
 ```
 
 Generates:
-- `build/VolumeGuard-v1.0.0-macOS.dmg` (Drag-and-drop installer with `/Applications` link)
-- `build/VolumeGuard-v1.0.0-macOS.zip` (ZIP archive for GitHub Releases)
+- `build/VolumeGuard-v1.0.1-macOS.dmg` (Drag-and-drop installer with `/Applications` link)
+- `build/VolumeGuard-v1.0.1-macOS.zip` (ZIP archive for GitHub Releases)
 
 ### 3. Installing the Driver
 
