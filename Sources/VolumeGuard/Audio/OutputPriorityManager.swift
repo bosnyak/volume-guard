@@ -28,6 +28,7 @@ final class OutputPriorityManager: ObservableObject {
             UserDefaults.standard.set(isEnabled, forKey: Keys.isEnabled)
             if isEnabled {
                 userForcedBuiltInSpeakerSession = false
+                captureNativeHardwareVolumesBeforeEnable()
                 evaluatePriorityAndRoute(reason: "app-enabled")
             } else {
                 deactivatePassthroughAndRestoreNativeOutput()
@@ -93,6 +94,7 @@ final class OutputPriorityManager: ObservableObject {
         static let preferredDevices = "vg.preferredDevices"
         static let perDeviceVolume = "vg.perDeviceVolume"
         static let perDeviceMute = "vg.perDeviceMute"
+        static let migratedHardwareUnityBugV1 = "vg.migratedHardwareUnityBugV1"
     }
 
     private init() {
@@ -111,6 +113,7 @@ final class OutputPriorityManager: ObservableObject {
 
     func start() {
         refreshDeviceList()
+        repairLegacyHardwareUnityVolumeIfNeeded()
         setupSystemListeners()
         setupWorkspaceWakeObservers()
         setupMediaKeyCallbacks()
@@ -150,6 +153,31 @@ final class OutputPriorityManager: ObservableObject {
             activeDevice = fallback
         }
         statusMessage = nil
+    }
+
+    /// One-time migration: earlier versions set hardware-volume devices (like MacBook Speakers)
+    /// to 1.0 (100%) on route. Restore their saved volume once and never force 1.0 again.
+    private func repairLegacyHardwareUnityVolumeIfNeeded() {
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: Keys.migratedHardwareUnityBugV1) else { return }
+        for dev in outputDevices where dev.supportsHardwareOutputVolume {
+            let vol = savedVolume(for: dev)
+            let muted = savedMute(for: dev)
+            dev.setVirtualMasterVolume(min(vol, 1.0))
+            dev.setMuted(muted)
+        }
+        defaults.set(true, forKey: Keys.migratedHardwareUnityBugV1)
+    }
+
+    /// Captures any volume or mute changes the user made natively in macOS while VolumeGuard was disabled.
+    private func captureNativeHardwareVolumesBeforeEnable() {
+        refreshDeviceList()
+        for dev in outputDevices where dev.supportsHardwareOutputVolume {
+            if let hwVol = dev.virtualMasterVolume {
+                saveVolume(hwVol, for: dev)
+            }
+            saveMute(dev.isMuted, for: dev)
+        }
     }
 
     // MARK: - Device Discovery & Priority Logic
@@ -297,9 +325,24 @@ final class OutputPriorityManager: ObservableObject {
 
         activeDevice = device
 
-        // Restore saved volume & mute for this device
-        let savedVol = savedVolume(for: device)
-        let savedMuted = savedMute(for: device)
+        // For devices with native macOS hardware volume (like MacBook Speakers), read their live
+        // volume & mute directly from macOS CoreAudio so we never overwrite System Settings -> Sound.
+        let savedVol: Float
+        let savedMuted: Bool
+        if device.supportsHardwareOutputVolume, let hwVol = device.virtualMasterVolume {
+            let persistedVol = savedVolume(for: device)
+            if boostEnabled && persistedVol > 1.0 && abs(hwVol - 1.0) < 0.01 {
+                savedVol = persistedVol
+            } else {
+                savedVol = hwVol
+                saveVolume(hwVol, for: device)
+            }
+            savedMuted = device.isMuted
+            saveMute(savedMuted, for: device)
+        } else {
+            savedVol = savedVolume(for: device)
+            savedMuted = savedMute(for: device)
+        }
         volume = savedVol
         isMuted = savedMuted
 
@@ -325,15 +368,15 @@ final class OutputPriorityManager: ObservableObject {
 
             attachVirtualDeviceListeners(virtualDev)
 
-            engine.gain = savedVol
-            engine.isMuted = savedMuted
-
-            // If physical device also has its own hardware volume control, set it to 100% (unity)
-            // so VolumeGuard's digital curve controls the full dynamic range cleanly
+            // When the physical device already has native hardware volume (e.g. MacBook Speakers),
+            // do NOT modify its hardware volume on route and keep software gain at unity (1.0)
+            // unless boosting above 100%.
             if device.supportsHardwareOutputVolume {
-                device.setVirtualMasterVolume(1.0)
-                device.setMuted(false)
+                engine.gain = max(1.0, savedVol)
+            } else {
+                engine.gain = savedVol
             }
+            engine.isMuted = savedMuted
 
             let started = engine.start(virtualDevice: virtualDev, outputDevice: device)
             isPassthroughActive = started
@@ -360,10 +403,6 @@ final class OutputPriorityManager: ObservableObject {
             if CoreAudioDevice.currentDefaultOutputDevice?.id != device.id {
                 CoreAudioDevice.currentDefaultOutputDevice = device
             }
-            if device.supportsHardwareOutputVolume {
-                device.setVirtualMasterVolume(min(savedVol, 1.0))
-                device.setMuted(savedMuted)
-            }
         }
 
         onStateChanged?()
@@ -379,12 +418,20 @@ final class OutputPriorityManager: ObservableObject {
             isMuted = false
         }
 
-        engine.gain = clamped
+        if let active = activeDevice, active.supportsHardwareOutputVolume {
+            engine.gain = max(1.0, clamped)
+        } else {
+            engine.gain = clamped
+        }
         engine.isMuted = isMuted
 
         if let active = activeDevice {
             saveVolume(clamped, for: active)
             saveMute(isMuted, for: active)
+            if active.supportsHardwareOutputVolume {
+                active.setVirtualMasterVolume(min(clamped, 1.0))
+                active.setMuted(isMuted)
+            }
         }
 
         if syncToDriver {
@@ -393,9 +440,6 @@ final class OutputPriorityManager: ObservableObject {
                 virtualDev.setVirtualMasterVolume(min(clamped, 1.0))
                 virtualDev.setMuted(isMuted)
                 isUpdatingDriverVolume = false
-            } else if let active = activeDevice, active.supportsHardwareOutputVolume {
-                active.setVirtualMasterVolume(min(clamped, 1.0))
-                active.setMuted(isMuted)
             }
         }
 
@@ -412,6 +456,9 @@ final class OutputPriorityManager: ObservableObject {
 
         if let active = activeDevice {
             saveMute(muted, for: active)
+            if active.supportsHardwareOutputVolume {
+                active.setMuted(muted)
+            }
         }
 
         if syncToDriver {
@@ -419,8 +466,6 @@ final class OutputPriorityManager: ObservableObject {
                 isUpdatingDriverVolume = true
                 virtualDev.setMuted(muted)
                 isUpdatingDriverVolume = false
-            } else if let active = activeDevice {
-                active.setMuted(muted)
             }
         }
 
